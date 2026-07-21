@@ -1,0 +1,88 @@
+===============================================
+  곡 제목: Where the Light Falls
+  아티스트: Ye-in (예인)
+  장르: Slow Cafe Jazz
+  BPM: 72-78
+  분위기: 따뜻하고 몽환적, 빛이 스며드는 느낌
+  테마: 빛이 닿는 곳마다 소중한 순간이 있다
+===============================================
+
+[Intro - Humming]
+Mm mm mm... mm mm mm...
+
+[Verse 1]
+Morning sun through the window glass
+Painting gold on the wooden floor
+I hold my cup and watch it pass
+Every shadow I've seen before
+
+[Pre-Chorus]
+But today it feels like something new
+Like the world is whispering just for you
+
+[Chorus]
+Where the light falls
+I will be there
+Softly waiting
+In the warm air
+Every moment
+Gently glowing
+Where the light falls
+Love keeps growing
+
+[Verse 2]
+Walking slow down the autumn street
+Leaves are dancing around my feet
+A stranger smiles as our eyes meet
+And the world feels soft and sweet
+
+[Pre-Chorus]
+Sometimes all you need is just a breath
+A little pause before the second step
+
+[Chorus]
+Where the light falls
+I will be there
+Softly waiting
+In the warm air
+Every moment
+Gently glowing
+Where the light falls
+Love keeps growing
+
+[Bridge]
+La la la... la la la...
+Close your eyes and let it in
+La la la... la la la...
+Let the quiet light begin
+
+[Outro Chorus - softer]
+Where the light falls
+I will stay
+Holding on to
+This gentle day...
+
+Mm mm mm...
+
+===============================================
+  SUNO 프롬프트 (Style of Music):
+===============================================
+
+Slow cafe jazz, acoustic guitar, soft piano chords, brushed drums,
+upright bass, light reverb, warm intimate recording,
+Korean female vocal singing in english, slight korean accent,
+young breathy female whisper, quiet vocals buried behind instruments,
+lazy mumbled articulation, youthful airy dreamy tone,
+72 BPM, gentle and warm, no belting, no loud vocals,
+soft humming intro, la la la bridge section
+
+===============================================
+  SUNO 프롬프트 (Title):
+===============================================
+
+Where the Light Falls
+
+===============================================
+  가사를 SUNO "Lyrics" 란에 위의 [Intro]~[Outro] 부분을
+  그대로 붙여넣기 하세요.
+===============================================

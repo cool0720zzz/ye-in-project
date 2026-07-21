@@ -1,0 +1,66 @@
+# ===== 미디어 (용량 큼 — GitHub에 올리지 않음) =====
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.bmp
+*.psd
+
+# ===== 오디오 =====
+*.mp3
+*.wav
+*.flac
+*.m4a
+*.aac
+*.ogg
+
+# ===== 모델 가중치 =====
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
+
+# ===== 폰트 =====
+assets/fonts/
+*.ttf
+*.otf
+*.woff
+*.woff2
+
+# ===== 압축 =====
+*.zip
+*.7z
+*.rar
+*.tar
+*.gz
+
+# ===== 파이썬 =====
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ===== 툴 캐시 / 세션 =====
+.omc/
+.claude/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== 대용량 작업 폴더 (텍스트만 예외로 허용) =====
+video/clips/
+video/output/
+video/poses/
+music/
+where_the_light_falls/
+Yein/
+
+# 위 폴더 안의 md 문서는 살림
+!video/*.md
