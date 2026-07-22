@@ -68,6 +68,7 @@ from pathlib import Path
 W, H = 1920, 1080
 FONT_SRC = r"C:\Windows\Fonts\malgun.ttf"
 FONT_BOLD = r"C:\Windows\Fonts\malgunbd.ttf"
+F_REG, F_BOLD = ".lv_cache/_lv_font.ttf", ".lv_cache/_lv_bold.ttf"
 
 VIDEO_EXT = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
 
@@ -356,10 +357,19 @@ def main():
         cues = parse_cues(a.cues) if a.cues else None
         timeline = build_timeline(sections, cues, dur)
 
+    # drawtext의 enable 판정이 실측상 1프레임 늦게 걸린다 (프레임 정밀 측정으로 확인:
+    # 이론상 1075프레임에서 바뀌어야 할 줄이 1076에서 바뀜). 그만큼 앞당겨 보정.
+    lead = 1 / FPS
+    timeline = [(max(0.0, s - lead), max(0.0, e - lead), t) for s, e, t in timeline]
+
     outp = Path(a.output).resolve()
     work = outp.parent
     work.mkdir(parents=True, exist_ok=True)
-    for src, dst in ((FONT_SRC, "_lv_font.ttf"), (FONT_BOLD, "_lv_bold.ttf")):
+    # 폰트는 상대경로로 넘겨야 드라이브 콜론 이스케이프를 피할 수 있다.
+    # 결과물 폴더가 지저분해지지 않도록 숨김 캐시 폴더에 둔다.
+    cache = work / ".lv_cache"
+    cache.mkdir(exist_ok=True)
+    for src, dst in ((FONT_SRC, F_REG), (FONT_BOLD, F_BOLD)):
         if not (work / dst).exists():
             shutil.copy(src, work / dst)
 
@@ -385,7 +395,7 @@ def main():
             style = ("box=1:boxcolor=black@0.82:boxborderw=18" if cur
                      else "shadowcolor=black@0.7:shadowx=2:shadowy=2")
             draws.append(
-                f"drawtext=fontfile={'_lv_bold.ttf' if cur else '_lv_font.ttf'}:"
+                f"drawtext=fontfile={F_BOLD if cur else F_REG}:"
                 f"textfile=_lv_{j:03d}.txt:"
                 f"x={lyr_x}:y={lyr_y + off * LYR_STEP}:"
                 f"fontsize={size}:fontcolor=white@{alpha}:{style}:"
@@ -409,13 +419,13 @@ def main():
         bg_fx = "boxblur=24:2,eq=brightness=-0.28:saturation=0.85"
 
     # ── 왼쪽 블록: 카드 아래 제목, 그 아래 카드 폭에 맞춘 진행바
-    left = (f"drawtext=fontfile=_lv_bold.ttf:textfile=_lv_title.txt:"
+    left = (f"drawtext=fontfile={F_BOLD}:textfile=_lv_title.txt:"
             f"x={CARD_X}:y={title_y}:fontsize={TITLE_SIZE}:fontcolor=white:"
             f"shadowcolor=black@0.65:shadowx=3:shadowy=3")
     if not a.no_bar:
         left = (f"drawbox=x={CARD_X}:y={bar_y}:w={cw}:h={BAR_H}:"
                 f"color=white@0.18:t=fill," + left +
-                f",drawtext=fontfile=_lv_font.ttf:text='{elapsed} / {total_esc}':"
+                f",drawtext=fontfile={F_REG}:text='{elapsed} / {total_esc}':"
                 f"x={CARD_X + cw}-tw:y={title_y + 20}:fontsize=30:fontcolor=white@0.85:"
                 f"shadowcolor=black@0.6:shadowx=2:shadowy=2")
 

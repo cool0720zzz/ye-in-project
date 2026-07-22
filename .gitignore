@@ -58,9 +58,15 @@ desktop.ini
 video/clips/
 video/output/
 video/poses/
-music/
 where_the_light_falls/
 Yein/
+lyric_output/
+
+# music/ — 음원은 빼되 LRC(가사 타임코드)는 살린다.
+# LRC는 손으로 맞춘 작업물이라 잃으면 다시 찍어야 한다.
+music/**
+!music/**/
+!music/**/*.lrc
 
 # 위 폴더 안의 md 문서는 살림
 !video/*.md
