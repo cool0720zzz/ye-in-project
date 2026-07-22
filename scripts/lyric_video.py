@@ -74,7 +74,7 @@ VIDEO_EXT = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
 # 레이아웃
 CARD_W, CARD_H = 720, 720  # 왼쪽 이미지 카드 (--card 로 변경. 16:9 소스면 800x450 권장)
 CARD_X = 130
-LYR_X = 980                # 가사 시작 x
+LYR_GAP = 100              # 카드 오른쪽 끝 ~ 가사 시작 사이 여백
 LYR_STEP = 82              # 줄 간격
 # (앞뒤 오프셋, 글자크기, 불투명도) — 현재 줄(0)은 검은 박스로 강조,
 # 아래로 갈수록 흐려지며 사라진다
@@ -288,6 +288,8 @@ def main():
     ap.add_argument("--timed", default=None,
                     help="⭐ LRC/SRT 파일 — 있으면 --lyrics·--cues 불필요 (가장 정확)")
     ap.add_argument("--cues", default=None, help="섹션 타임코드 파일 (없으면 균등 분배)")
+    ap.add_argument("--lyrics-x", type=int, default=None,
+                    help="가사 시작 x (기본: 카드 오른쪽에 자동 배치)")
     ap.add_argument("--card", default=f"{CARD_W}x{CARD_H}",
                     help="왼쪽 카드 크기 WxH (기본 720x720). "
                          "16:9 소스는 800x450 이 잘리는 데 없이 예쁘다")
@@ -322,9 +324,11 @@ def main():
     if not m:
         sys.exit(f"[에러] --card 는 '800x450' 형식이어야 합니다: {a.card!r}")
     cw, ch = int(m.group(1)), int(m.group(2))
-    if CARD_X + cw + 30 > LYR_X:
-        sys.exit(f"[에러] 카드 너비 {cw}px 가 가사 영역(x={LYR_X})을 침범합니다. "
-                 f"{LYR_X - CARD_X - 30}px 이하로 잡으세요.")
+    # 가사는 카드 오른쪽에 붙여 배치 — 카드를 줄여도 두 단 간격이 유지된다
+    lyr_x = a.lyrics_x if a.lyrics_x else CARD_X + cw + LYR_GAP
+    if lyr_x + 760 > W:
+        sys.exit(f"[에러] 가사 시작 x={lyr_x} 이 너무 오른쪽이라 긴 줄이 잘립니다. "
+                 f"카드를 좁히거나 --lyrics-x 로 당기세요.")
     # ── 왼쪽 세로 블록: [카드] → [제목] → [진행바] 를 하나로 묶어 화면 수직 중앙에.
     #    진행바 폭을 카드 폭에 맞춰야 오른쪽 가사와 레이아웃이 맞아 보인다.
     TITLE_SIZE, GAP_CT, GAP_TB = 52, 34, 26
@@ -374,7 +378,7 @@ def main():
             draws.append(
                 f"drawtext=fontfile={'_lv_bold.ttf' if cur else '_lv_font.ttf'}:"
                 f"textfile=_lv_{j:03d}.txt:"
-                f"x={LYR_X}:y={lyr_y + off * LYR_STEP}:"
+                f"x={lyr_x}:y={lyr_y + off * LYR_STEP}:"
                 f"fontsize={size}:fontcolor=white@{alpha}:{style}:"
                 f"enable='between(t,{s:.3f},{e:.3f})'"
             )
