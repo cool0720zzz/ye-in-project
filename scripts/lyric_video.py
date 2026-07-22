@@ -79,12 +79,16 @@ LYR_GAP = 100              # 카드 오른쪽 끝 ~ 가사 시작 사이 여백
 LYR_STEP = 82              # 줄 간격
 # (앞뒤 오프셋, 글자크기, 불투명도) — 현재 줄(0)은 검은 박스로 강조,
 # 아래로 갈수록 흐려지며 사라진다
-SLOTS = [(-1, 42, 0.40), (0, 52, 1.00), (1, 44, 0.80), (2, 42, 0.60), (3, 40, 0.35)]
-# --glide 용. 위아래로 한 칸씩(-2, +4) 더 두어 **페이드 인/아웃 자리**를 만든다.
-# 이게 없으면 맨 위 줄이 사라질 때·맨 아래 줄이 나타날 때 툭 튄다.
-SLOT_STYLE = {-2: (42, 0.00), -1: (42, 0.40), 0: (52, 1.00),
-              1: (44, 0.80), 2: (42, 0.60), 3: (40, 0.35), 4: (40, 0.00)}
+# 가사 5줄 스택 — **메인이 가운데(3번째 줄)**. {오프셋: (글자크기, 불투명도)}
+# -3은 위로 빠져나가며 사라지는 자리, +3(암묵)은 아래에서 나타나는 자리다.
+# 이 여유 칸이 없으면 맨 윗줄이 사라질 때·맨 아랫줄이 나타날 때 툭 튄다.
+SLOT_STYLE = {-3: (42, 0.00), -2: (42, 0.30), -1: (44, 0.55),
+              0: (62, 1.00),
+              1: (44, 0.55), 2: (42, 0.30), 3: (42, 0.00)}
+# 줄마다 초점을 다르게 — 메인만 선명하고 멀어질수록 흐려진다 (피사계 심도)
+SLOT_BLUR = {-3: 5.0, -2: 5.0, -1: 2.0, 0: 0.0, 1: 2.0, 2: 5.0, 3: 5.0}
 GLIDE_T = 0.28             # 한 칸 미끄러지는 데 걸리는 시간(초)
+INTRO_STEP = 1.10          # 도입부에 첫 줄이 한 칸씩 올라오는 간격(초)
 BAR_H = 6                  # 진행바 두께 (폭은 카드 폭에 맞춰 자동)
 WAVE_H = 64                # --wave 파형 높이
 FPS = 24
@@ -282,6 +286,26 @@ def beat_commands(audio, dur, fps, base_sigma, peak_sigma, base_bri, peak_bri):
     return "\n".join(out), len(beats)
 
 
+def fit_main_size(lines, want, lyr_x, margin=40):
+    """메인 줄이 화면 밖으로 넘치지 않는 최대 글자 크기를 찾는다.
+
+    ⚠️ 눈으로 몇 프레임 보는 걸로는 못 잡는다 — 긴 줄이 나오는 순간에만 잘리기
+    때문. 실제로 62px에서 「네온」 36줄 중 10줄이 잘렸다.
+    """
+    avail = W - lyr_x - margin
+    try:
+        from PIL import ImageFont
+    except ImportError:
+        print(f"[경고] Pillow가 없어 글자 넘침을 검사하지 못했습니다 ({want}px 그대로 사용)")
+        return want, avail, None
+    for size in range(want, 29, -2):
+        font = ImageFont.truetype(FONT_BOLD, size)
+        widest = max(font.getlength(l) for l in lines)
+        if widest <= avail:
+            return size, avail, int(widest)
+    return 30, avail, None
+
+
 def esc(path_or_text):
     """drawtext 옵션 값 안의 콜론·작은따옴표 이스케이프."""
     return str(path_or_text).replace("\\", "/").replace(":", r"\:").replace("'", r"\'")
@@ -354,8 +378,9 @@ def main():
     cy = max(0, (H - block_h) // 2)
     title_y = cy + ch + GAP_CT
     bar_y = title_y + TITLE_SIZE + GAP_TB
-    # 가사 스택(-1~+3행)의 중심을 왼쪽 블록의 중심과 맞춘다
-    lyr_y = cy + block_h // 2 - LYR_STEP
+    # 5줄 스택(-2~+2)의 **가운데 줄(메인)**을 왼쪽 블록의 세로 중심에 맞춘다.
+    # y는 글자 상단이므로 메인 글자 높이의 절반만큼 올려야 광학적으로 가운데다.
+    lyr_y = cy + block_h // 2 - SLOT_STYLE[0][0] // 2
 
     dur = audio_duration(a.audio)
     title = a.title or Path(a.audio).stem
@@ -392,51 +417,75 @@ def main():
                          encoding="utf-8")
     tmp.append(title_txt)
 
-    # ── 가사 drawtext
-    draws = []
-    if not a.glide:
-        # 기본: 자리도 밝기도 그 순간 툭 바뀐다. 현재 줄은 검은 박스로 강조
-        for i, (s, e, _) in enumerate(timeline):
-            for off, size, alpha in SLOTS:
-                j = i + off          # 이 슬롯에 그릴 가사 줄
-                if not 0 <= j < len(timeline):
+    # ── 메인 글자가 오른쪽으로 넘치지 않게 크기를 자동으로 낮춘다
+    want = SLOT_STYLE[0][0]
+    main_size, avail_w, widest = fit_main_size(
+        [t for _, _, t in timeline], want, lyr_x)
+    if main_size != want:
+        print(f"[조정] 메인 글자 {want}px → {main_size}px "
+              f"(가사 폭 {avail_w}px 안에 최장 줄이 안 들어감)")
+    SLOT_STYLE[0] = (main_size, SLOT_STYLE[0][1])
+    lyr_y = cy + block_h // 2 - main_size // 2   # 크기가 바뀌었으니 중심 다시 잡기
+
+    # ── 가사가 그려질 캔버스 (블러를 걸어야 하므로 화면 전체가 아니라 이 영역만)
+    cvs_x = lyr_x
+    cvs_top = max(0, lyr_y - 3 * LYR_STEP - 40)
+    cvs_w = W - lyr_x
+    cvs_h = min(H - cvs_top, 7 * LYR_STEP + 160)
+
+    # ── 도입 스크롤: 첫 가사가 곧바로 메인 자리에 뜨지 않고,
+    #    아래에서 한 칸씩 올라와 제 시각에 메인 줄에 도착한다.
+    #    메인 줄 번호가 -2, -1인 가상 구간을 앞에 붙여서 만든다.
+    segs, s0 = [], timeline[0][0]
+    for n in (2, 1):
+        lo, hi = s0 - n * INTRO_STEP, s0 - (n - 1) * INTRO_STEP
+        if hi > 0:
+            segs.append((max(0.0, lo), hi, -n))
+    segs += [(s, e, i) for i, (s, e, _) in enumerate(timeline)]
+
+    # ── 가사 drawtext를 **블러 강도별 레이어로** 나눈다.
+    #    drawtext 자체는 흐리게 못 그리므로, 같은 흐림끼리 한 판에 모아 gblur를 건다.
+    layers = {}
+    for s, e, k in segs:
+        for off in range(-3, 3):
+            j = k + off
+            if not 0 <= j < len(timeline):
+                continue
+            size, al = SLOT_STYLE[off]
+            _, pal = SLOT_STYLE[off + 1]        # 직전 칸(= 이 줄이 있던 자리)의 밝기
+            y_fix = lyr_y + off * LYR_STEP - cvs_top
+            if not a.glide:
+                if al == 0:
                     continue
-                cur = off == 0
-                style = ("box=1:boxcolor=black@0.82:boxborderw=18" if cur
-                         else "shadowcolor=black@0.7:shadowx=2:shadowy=2")
-                draws.append(
-                    f"drawtext=fontfile={F_BOLD if cur else F_REG}:"
-                    f"textfile=_lv_{j:03d}.txt:"
-                    f"x={lyr_x}:y={lyr_y + off * LYR_STEP}:"
-                    f"fontsize={size}:fontcolor=white@{alpha}:{style}:"
-                    f"enable='between(t,{s:.3f},{e:.3f})'"
-                )
-    else:
-        # 미끄러짐: 줄이 바뀌는 순간 **이전 칸 위치에서 출발해** 새 칸으로 흘러간다.
-        # y는 easeOutBack(끝에서 살짝 넘쳤다 돌아옴)으로 「꿀렁」을, alpha는
-        # 선형으로 밝기 전환을 담당한다. fontsize는 표현식을 못 받아 그 순간 바뀐다.
-        # ⚠️ 검은 박스는 쓰지 않는다 — boxcolor가 표현식을 못 받아 박스만 순간이동한다.
-        for i, (s, e, _) in enumerate(timeline):
-            for off in (-2, -1, 0, 1, 2, 3):
-                j = i + off
-                if not 0 <= j < len(timeline):
-                    continue
-                size, al = SLOT_STYLE[off]
-                _, pal = SLOT_STYLE[off + 1]        # 직전 칸의 밝기
+                pos = f"y={y_fix}:fontcolor=white@{al}"
+            else:
+                # 이전 칸 위치에서 출발해 새 칸으로 흘러간다.
+                # y는 easeOutBack(끝에서 살짝 넘쳤다 돌아옴)으로 「꿀렁」을,
+                # alpha는 선형으로 밝기 전환을 담당한다.
                 if al == 0 and pal == 0:
                     continue
                 p = f"min(1,max(0,(t-{s:.3f})/{GLIDE_T}))"
                 ease = f"(1+2.70158*pow({p}-1,3)+1.70158*pow({p}-1,2))"
-                draws.append(
-                    f"drawtext=fontfile={F_BOLD if off == 0 else F_REG}:"
-                    f"textfile=_lv_{j:03d}.txt:"
-                    f"x={lyr_x}:"
-                    f"y='{lyr_y}+{LYR_STEP}*(({off}+1)-{ease})':"
-                    f"fontsize={size}:fontcolor=white:"
-                    f"alpha='{pal:.2f}+{al - pal:.2f}*{p}':"
-                    f"shadowcolor=black@0.7:shadowx=2:shadowy=2:"
-                    f"enable='between(t,{s:.3f},{e:.3f})'"
-                )
+                pos = (f"y='{lyr_y - cvs_top}+{LYR_STEP}*(({off}+1)-{ease})':"
+                       f"fontcolor=white:alpha='{pal:.2f}+{al - pal:.2f}*{p}'")
+            layers.setdefault(SLOT_BLUR[off], []).append(
+                f"drawtext=fontfile={F_BOLD if off == 0 else F_REG}:"
+                f"textfile=_lv_{j:03d}.txt:x=0:{pos}:fontsize={size}:"
+                f"shadowcolor=black@0.7:shadowx=2:shadowy=2:"
+                f"enable='between(t,{s:.3f},{e:.3f})'"
+            )
+
+    # 흐린 층부터 깔고 선명한 층을 위에 올린다
+    lyr_fc, lyr_labels = "", []
+    for n, sigma in enumerate(sorted(layers, reverse=True)):
+        lab = f"lyr{n}"
+        # ⚠️ 투명 캔버스에 그린 글자를 그냥 블러하면 검은 배경색이 섞여 테두리가
+        #    거뭇해진다. premultiply로 감쌌다 풀어야 깨끗하다.
+        fx = (f",premultiply=inplace=1,gblur=sigma={sigma}:planes=15,"
+              f"unpremultiply=inplace=1" if sigma > 0 else "")
+        lyr_fc += (f"color=c=black@0:s={cvs_w}x{cvs_h}:d={dur + 1}:r={FPS},"
+                   f"format=rgba," + ",".join(layers[sigma]) + fx + f"[{lab}];")
+        lyr_labels.append(lab)
 
     total_esc = mmss(dur).replace(":", r"\:")
     elapsed = r"%{eif\:floor(t/60)\:d}\:%{eif\:floor(mod(t\,60))\:d\:2}"
@@ -511,8 +560,14 @@ def main():
         f"{card_in}scale={cw}:{ch}:force_original_aspect_ratio=increase,"
         f"crop={cw}:{ch}[card];"
         f"[bg][card]overlay={CARD_X}:{cy}[base];"
-        f"[base]{left}," + ",".join(draws) + "[body];"
+        f"[base]{left}[body0];" + lyr_fc
     )
+    prev = "body0"
+    for n, lab in enumerate(lyr_labels):
+        fc += f"[{prev}][{lab}]overlay={cvs_x}:{cvs_top}[body{n + 1}];"
+        prev = f"body{n + 1}"
+    fc += f"[{prev}]null[body];"      # 아래 진행바 단계가 [body]를 받는다
+
     if a.no_bar:
         fc = fc[:-len("[body];")] + "[out]"
     elif i_wave is not None:
