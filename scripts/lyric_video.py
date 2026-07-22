@@ -75,12 +75,12 @@ VIDEO_EXT = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
 CARD_W, CARD_H = 720, 720  # 왼쪽 이미지 카드 (--card 로 변경. 16:9 소스면 800x450 권장)
 CARD_X = 130
 LYR_X = 980                # 가사 시작 x
-LYR_Y = 470                # 현재 줄의 y (여기를 중심으로 위아래 배치)
 LYR_STEP = 82              # 줄 간격
 # (앞뒤 오프셋, 글자크기, 불투명도) — 현재 줄(0)은 검은 박스로 강조,
 # 아래로 갈수록 흐려지며 사라진다
 SLOTS = [(-1, 42, 0.40), (0, 52, 1.00), (1, 44, 0.80), (2, 42, 0.60), (3, 40, 0.35)]
-BAR_X, BAR_Y, BAR_H = 130, 980, 6
+BAR_H = 6                  # 진행바 두께 (폭은 카드 폭에 맞춰 자동)
+FPS = 24
 
 
 def run(cmd, **kw):
@@ -236,6 +236,45 @@ def build_timeline(sections, cues, dur):
     return timeline
 
 
+def beat_commands(audio, dur, fps, base_sigma, peak_sigma, base_bri, peak_bri):
+    """비트에 맞춰 배경 보케가 부풀었다 사그라드는 sendcmd 스크립트를 만든다.
+
+    멀리 있는 네온이 박자마다 초점이 나가며 번지는 느낌 — 배경에만 걸고
+    인물 카드는 선명하게 남긴다.
+
+    ⚠️ 실측으로 확인한 두 가지 (scratchpad/verify.py):
+      1. gblur와 eq에 **같은 인스턴스 이름**을 주면 sendcmd가 엉뚱하게 먹어
+         밝기가 오히려 반대로 간다. 반드시 @blr / @brt 로 분리할 것.
+      2. sendcmd는 약 2프레임 늦게 적용된다. 그만큼 앞당겨 발행해야
+         비트와 위상이 맞는다. (보정 전 상관 +0.40 → 보정 후 +0.89)
+    """
+    import librosa                      # --beat 쓸 때만 필요
+    import numpy as np
+
+    y, sr = librosa.load(audio, sr=22050, mono=True)
+    _, beats = librosa.beat.beat_track(y=y, sr=sr, units="time")
+    env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=512)
+    et = librosa.frames_to_time(np.arange(len(env)), sr=sr, hop_length=512)
+    amp = np.interp(beats, et, env)
+    amp = amp / (amp.max() or 1.0)      # 세게 친 박자일수록 크게 번진다
+
+    t = np.arange(int(dur * fps)) / fps
+    pulse = np.zeros_like(t)
+    for bt, a in zip(beats, amp):
+        m = (t >= bt) & (t - bt < 0.5)
+        pulse[m] = np.maximum(pulse[m], a * np.exp(-(t[m] - bt) / 0.16))
+
+    lead = 2 / fps
+    out = []
+    for tt, p in zip(t, pulse):
+        ts = max(0.0, tt - lead)
+        out.append(f"{ts:.3f} gblur@blr sigma "
+                   f"{base_sigma + (peak_sigma - base_sigma) * p:.2f};")
+        out.append(f"{ts:.3f} eq@brt brightness "
+                   f"{base_bri + (peak_bri - base_bri) * p:.3f};")
+    return "\n".join(out), len(beats)
+
+
 def esc(path_or_text):
     """drawtext 옵션 값 안의 콜론·작은따옴표 이스케이프."""
     return str(path_or_text).replace("\\", "/").replace(":", r"\:").replace("'", r"\'")
@@ -253,7 +292,10 @@ def main():
                     help="왼쪽 카드 크기 WxH (기본 720x720). "
                          "16:9 소스는 800x450 이 잘리는 데 없이 예쁘다")
     ap.add_argument("--title", default=None, help="제목 (생략 시 오디오 파일명)")
-    ap.add_argument("--artist", default="", help="아티스트")
+    ap.add_argument("--artist", default="", help="아티스트 (기본: 표기 안 함)")
+    ap.add_argument("--no-bar", action="store_true", help="진행바·시간 빼고 제목만")
+    ap.add_argument("--beat", action="store_true",
+                    help="⭐ 비트에 맞춰 배경 네온이 초점 나가며 번지는 효과 (librosa 필요)")
     ap.add_argument("--dump-cues", action="store_true",
                     help="가사 섹션 목록을 큐 파일 틀로 출력하고 종료")
     ap.add_argument("-o", "--output", default=None)
@@ -283,7 +325,15 @@ def main():
     if CARD_X + cw + 30 > LYR_X:
         sys.exit(f"[에러] 카드 너비 {cw}px 가 가사 영역(x={LYR_X})을 침범합니다. "
                  f"{LYR_X - CARD_X - 30}px 이하로 잡으세요.")
-    cy = max(0, (BAR_Y - 100 - ch) // 2)   # 하단 제목·진행바 위 영역에 수직 중앙 배치
+    # ── 왼쪽 세로 블록: [카드] → [제목] → [진행바] 를 하나로 묶어 화면 수직 중앙에.
+    #    진행바 폭을 카드 폭에 맞춰야 오른쪽 가사와 레이아웃이 맞아 보인다.
+    TITLE_SIZE, GAP_CT, GAP_TB = 52, 34, 26
+    block_h = ch + GAP_CT + TITLE_SIZE + (0 if a.no_bar else GAP_TB + BAR_H)
+    cy = max(0, (H - block_h) // 2)
+    title_y = cy + ch + GAP_CT
+    bar_y = title_y + TITLE_SIZE + GAP_TB
+    # 가사 스택(-1~+3행)의 중심을 왼쪽 블록의 중심과 맞춘다
+    lyr_y = cy + block_h // 2 - LYR_STEP
 
     dur = audio_duration(a.audio)
     title = a.title or Path(a.audio).stem
@@ -324,38 +374,55 @@ def main():
             draws.append(
                 f"drawtext=fontfile={'_lv_bold.ttf' if cur else '_lv_font.ttf'}:"
                 f"textfile=_lv_{j:03d}.txt:"
-                f"x={LYR_X}:y={LYR_Y + off * LYR_STEP}:"
+                f"x={LYR_X}:y={lyr_y + off * LYR_STEP}:"
                 f"fontsize={size}:fontcolor=white@{alpha}:{style}:"
                 f"enable='between(t,{s:.3f},{e:.3f})'"
             )
 
-    bw = W - BAR_X * 2
     total_esc = mmss(dur).replace(":", r"\:")
     elapsed = r"%{eif\:floor(t/60)\:d}\:%{eif\:floor(mod(t\,60))\:d\:2}"
 
+    # ── 배경 처리: 비트 반응이면 sendcmd로 blur·밝기를 프레임마다 흔든다
+    n_beats = 0
+    if a.beat:
+        script, n_beats = beat_commands(a.audio, dur, FPS,
+                                        base_sigma=16, peak_sigma=32,
+                                        base_bri=-0.32, peak_bri=-0.14)
+        (work / "_lv_cmd.txt").write_text(script, encoding="utf-8")
+        tmp.append(work / "_lv_cmd.txt")
+        bg_fx = ("sendcmd=f=_lv_cmd.txt,gblur@blr=sigma=16,"
+                 "eq@brt=brightness=-0.32:saturation=0.85")
+    else:
+        bg_fx = "boxblur=24:2,eq=brightness=-0.28:saturation=0.85"
+
+    # ── 왼쪽 블록: 카드 아래 제목, 그 아래 카드 폭에 맞춘 진행바
+    left = (f"drawtext=fontfile=_lv_bold.ttf:textfile=_lv_title.txt:"
+            f"x={CARD_X}:y={title_y}:fontsize={TITLE_SIZE}:fontcolor=white:"
+            f"shadowcolor=black@0.65:shadowx=3:shadowy=3")
+    if not a.no_bar:
+        left = (f"drawbox=x={CARD_X}:y={bar_y}:w={cw}:h={BAR_H}:"
+                f"color=white@0.18:t=fill," + left +
+                f",drawtext=fontfile=_lv_font.ttf:text='{elapsed} / {total_esc}':"
+                f"x={CARD_X + cw}-tw:y={title_y + 20}:fontsize=30:fontcolor=white@0.85:"
+                f"shadowcolor=black@0.6:shadowx=2:shadowy=2")
+
     fc = (
         f"[0:v]split=2[b0][b1];"
-        # 배경: 꽉 채워 블러 + 어둡게
+        # 배경: 꽉 채워 블러 + 어둡게 (먼 거리 네온이 뭉개지는 층)
         f"[b0]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
-        f"boxblur=24:2,eq=brightness=-0.28:saturation=0.85[bg];"
-        # 카드: 왼쪽 정사각 썸네일
+        f"{bg_fx}[bg];"
+        # 카드: 인물. 배경 효과가 걸리지 않아 선명하게 남는다
         f"[b1]scale={cw}:{ch}:force_original_aspect_ratio=increase,"
         f"crop={cw}:{ch}[card];"
         f"[bg][card]overlay={CARD_X}:{cy}[base];"
-        # 하단 제목 + 진행바 틀 + 시간
-        f"[base]drawbox=x={BAR_X}:y={BAR_Y}:w={bw}:h={BAR_H}:color=white@0.18:t=fill,"
-        f"drawtext=fontfile=_lv_bold.ttf:textfile=_lv_title.txt:"
-        f"x={BAR_X}:y={BAR_Y - 88}:fontsize=52:fontcolor=white:"
-        f"shadowcolor=black@0.65:shadowx=3:shadowy=3,"
-        f"drawtext=fontfile=_lv_font.ttf:text='{elapsed} / {total_esc}':"
-        f"x={BAR_X + bw}-tw:y={BAR_Y - 52}:fontsize=32:fontcolor=white@0.9:"
-        f"shadowcolor=black@0.6:shadowx=2:shadowy=2,"
-        + ",".join(draws) + "[body];"
-        # 차오르는 진행바
-        f"color=c=white:s={bw}x{BAR_H}:d={dur + 1}:r=24,format=rgba,"
-        f"geq=r=255:g=255:b=255:a='if(lt(X,W*T/{dur}),235,0)'[bar];"
-        f"[body][bar]overlay={BAR_X}:{BAR_Y}[out]"
+        f"[base]{left}," + ",".join(draws) + "[body];"
     )
+    if a.no_bar:
+        fc = fc[:-len("[body];")] + "[out]"
+    else:
+        fc += (f"color=c=white:s={cw}x{BAR_H}:d={dur + 1}:r={FPS},format=rgba,"
+               f"geq=r=255:g=255:b=255:a='if(lt(X,W*T/{dur}),235,0)'[bar];"
+               f"[body][bar]overlay={CARD_X}:{bar_y}[out]")
 
     # 가사가 많으면 필터가 수만 자가 되어 Windows 명령줄 한도(~32KB)를 넘는다
     # → 파일로 넘긴다
@@ -369,7 +436,7 @@ def main():
         else ["-loop", "1", "-i", str(Path(a.bg).resolve())]
     cmd += ["-i", str(Path(a.audio).resolve()),
             "-t", f"{dur}", "-filter_complex_script", "_lv_filter.txt",
-            "-map", "[out]", "-map", "1:a", "-r", "24",
+            "-map", "[out]", "-map", "1:a", "-r", str(FPS),
             "-c:a", "aac", "-b:a", "192k", "-shortest",
             "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p",
             str(outp), "-loglevel", "error"]
@@ -377,7 +444,9 @@ def main():
     src = "루프영상" if is_video else "스틸"
     mode = (f"⭐ {Path(a.timed).name}" if a.timed
             else f"큐 {Path(a.cues).name}" if cues else "⚠️ 균등 분배(미리보기)")
-    print(f"[정보] {title} / {mmss(dur)} / 가사 {len(timeline)}줄 / {src} / 타이밍: {mode}")
+    fx = f" / 비트반응 {n_beats}비트" if a.beat else ""
+    print(f"[정보] {title} / {mmss(dur)} / 가사 {len(timeline)}줄 / {src} / "
+          f"타이밍: {mode}{fx}")
     try:
         subprocess.run(cmd, check=True, cwd=work)
     finally:
