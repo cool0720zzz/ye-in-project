@@ -80,6 +80,7 @@ LYR_STEP = 82              # 줄 간격
 # 아래로 갈수록 흐려지며 사라진다
 SLOTS = [(-1, 42, 0.40), (0, 52, 1.00), (1, 44, 0.80), (2, 42, 0.60), (3, 40, 0.35)]
 BAR_H = 6                  # 진행바 두께 (폭은 카드 폭에 맞춰 자동)
+WAVE_H = 64                # --wave 파형 높이
 FPS = 24
 
 
@@ -284,7 +285,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--audio", required=True, help="곡 오디오")
     ap.add_argument("--lyrics", default=None, help="가사 .md (lyrics/A01_네온.md)")
-    ap.add_argument("--bg", required=True, help="메인 이미지 또는 루프 영상")
+    ap.add_argument("--bg", required=True,
+                    help="배경 (흐리게 깔린다). 이미지·영상 둘 다 가능")
+    ap.add_argument("--card-src", default=None,
+                    help="카드에 넣을 소스. 생략하면 --bg 를 같이 쓴다. "
+                         "배경은 사진, 카드는 루프 영상 같은 조합에 쓴다")
     ap.add_argument("--timed", default=None,
                     help="⭐ LRC/SRT 파일 — 있으면 --lyrics·--cues 불필요 (가장 정확)")
     ap.add_argument("--cues", default=None, help="섹션 타임코드 파일 (없으면 균등 분배)")
@@ -296,6 +301,9 @@ def main():
     ap.add_argument("--title", default=None, help="제목 (생략 시 오디오 파일명)")
     ap.add_argument("--artist", default="", help="아티스트 (기본: 표기 안 함)")
     ap.add_argument("--no-bar", action="store_true", help="진행바·시간 빼고 제목만")
+    ap.add_argument("--wave", action="store_true",
+                    help="⭐ 밋밋한 진행바 대신 곡 전체 파형. 재생된 만큼만 밝아진다 "
+                         "(움직이지 않아 가사를 방해하지 않는다)")
     ap.add_argument("--beat", action="store_true",
                     help="⭐ 비트에 맞춰 배경 네온이 초점 나가며 번지는 효과 (librosa 필요)")
     ap.add_argument("--dump-cues", action="store_true",
@@ -332,7 +340,8 @@ def main():
     # ── 왼쪽 세로 블록: [카드] → [제목] → [진행바] 를 하나로 묶어 화면 수직 중앙에.
     #    진행바 폭을 카드 폭에 맞춰야 오른쪽 가사와 레이아웃이 맞아 보인다.
     TITLE_SIZE, GAP_CT, GAP_TB = 52, 34, 26
-    block_h = ch + GAP_CT + TITLE_SIZE + (0 if a.no_bar else GAP_TB + BAR_H)
+    bar_h = WAVE_H if a.wave else BAR_H
+    block_h = ch + GAP_CT + TITLE_SIZE + (0 if a.no_bar else GAP_TB + bar_h)
     cy = max(0, (H - block_h) // 2)
     title_y = cy + ch + GAP_CT
     bar_y = title_y + TITLE_SIZE + GAP_TB
@@ -410,19 +419,70 @@ def main():
                 f"x={CARD_X + cw}-tw:y={title_y + 20}:fontsize=30:fontcolor=white@0.85:"
                 f"shadowcolor=black@0.6:shadowx=2:shadowy=2")
 
+    # ── 입력 구성. 배경과 카드를 다른 소스로 줄 수 있다
+    #    (배경=사진 흐리게 / 카드=루프 영상 같은 조합)
+    ins = []
+
+    def add_visual(path):
+        p = str(Path(path).resolve())
+        ins.append(["-stream_loop", "-1", "-i", p]
+                   if Path(path).suffix.lower() in VIDEO_EXT
+                   else ["-loop", "1", "-i", p])
+        return len(ins) - 1
+
+    i_bg = add_visual(a.bg)
+    i_card = add_visual(a.card_src) if a.card_src else None
+    ins.append(["-i", str(Path(a.audio).resolve())])
+    i_aud = len(ins) - 1
+
+    i_wave = None
+    if a.wave and not a.no_bar:
+        wave_png = work / "_lv_wave.png"
+        run(["ffmpeg", "-y", "-i", str(Path(a.audio).resolve()),
+             "-filter_complex",
+             # ⚠️ scale=cbrt 필수. 기본값(lin)은 이 장르의 좁은 다이내믹 레인지에서
+             #    띠의 10.9%밖에 못 채워 긁힌 자국처럼 보인다 (cbrt는 46.9%)
+             f"showwavespic=s={cw}x{WAVE_H}:colors=white:"
+             f"split_channels=0:scale=cbrt",
+             "-frames:v", "1", str(wave_png), "-loglevel", "error"])
+        tmp.append(wave_png)
+        ins.append(["-loop", "1", "-i", str(wave_png)])
+        i_wave = len(ins) - 1
+
+    if i_card is None:                       # 한 소스를 배경·카드에 같이 쓴다
+        head = f"[{i_bg}:v]split=2[b0][b1];"
+        bg_in, card_in = "[b0]", "[b1]"
+    else:
+        head = ""
+        bg_in, card_in = f"[{i_bg}:v]", f"[{i_card}:v]"
+
     fc = (
-        f"[0:v]split=2[b0][b1];"
+        head +
         # 배경: 꽉 채워 블러 + 어둡게 (먼 거리 네온이 뭉개지는 층)
-        f"[b0]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
+        f"{bg_in}scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
         f"{bg_fx}[bg];"
         # 카드: 인물. 배경 효과가 걸리지 않아 선명하게 남는다
-        f"[b1]scale={cw}:{ch}:force_original_aspect_ratio=increase,"
+        f"{card_in}scale={cw}:{ch}:force_original_aspect_ratio=increase,"
         f"crop={cw}:{ch}[card];"
         f"[bg][card]overlay={CARD_X}:{cy}[base];"
         f"[base]{left}," + ",".join(draws) + "[body];"
     )
     if a.no_bar:
         fc = fc[:-len("[body];")] + "[out]"
+    elif i_wave is not None:
+        # 곡 전체 파형을 깔고(어둡게), 재생된 구간만 밝은 판으로 덮는다.
+        # lumakey가 showwavespic의 검은 배경을 투명으로 바꿔 준다.
+        played = f"lt(X,W*T/{dur})"
+        fc += (
+            f"[{i_wave}:v]format=rgba,split=2[wA][wB];"
+            f"[wA]lumakey=threshold=0.06:tolerance=0.06,"
+            f"colorchannelmixer=aa=0.30[wdim];"
+            f"[wB]geq=r='if({played},r(X,Y),0)':g='if({played},g(X,Y),0)':"
+            f"b='if({played},b(X,Y),0)':a=255,"
+            f"lumakey=threshold=0.06:tolerance=0.06[wbr];"
+            f"[body][wdim]overlay={CARD_X}:{bar_y}[bw];"
+            f"[bw][wbr]overlay={CARD_X}:{bar_y}[out]"
+        )
     else:
         fc += (f"color=c=white:s={cw}x{BAR_H}:d={dur + 1}:r={FPS},format=rgba,"
                f"geq=r=255:g=255:b=255:a='if(lt(X,W*T/{dur}),235,0)'[bar];"
@@ -434,18 +494,20 @@ def main():
     fc_file.write_text(fc, encoding="utf-8")
     tmp.append(fc_file)
 
-    is_video = Path(a.bg).suffix.lower() in VIDEO_EXT
     cmd = ["ffmpeg", "-y"]
-    cmd += ["-stream_loop", "-1", "-i", str(Path(a.bg).resolve())] if is_video \
-        else ["-loop", "1", "-i", str(Path(a.bg).resolve())]
-    cmd += ["-i", str(Path(a.audio).resolve()),
-            "-t", f"{dur}", "-filter_complex_script", "_lv_filter.txt",
-            "-map", "[out]", "-map", "1:a", "-r", str(FPS),
+    for chunk in ins:
+        cmd += chunk
+    cmd += ["-t", f"{dur}", "-filter_complex_script", "_lv_filter.txt",
+            "-map", "[out]", "-map", f"{i_aud}:a", "-r", str(FPS),
             "-c:a", "aac", "-b:a", "192k", "-shortest",
             "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p",
             str(outp), "-loglevel", "error"]
 
-    src = "루프영상" if is_video else "스틸"
+    kind = lambda p: "영상" if Path(p).suffix.lower() in VIDEO_EXT else "스틸"
+    src = (f"배경={kind(a.bg)}·카드={kind(a.card_src)}" if a.card_src
+           else f"배경·카드={kind(a.bg)}")
+    if a.wave and not a.no_bar:
+        src += " / 파형바"
     mode = (f"⭐ {Path(a.timed).name}" if a.timed
             else f"큐 {Path(a.cues).name}" if cues else "⚠️ 균등 분배(미리보기)")
     fx = f" / 비트반응 {n_beats}비트" if a.beat else ""
