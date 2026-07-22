@@ -72,8 +72,8 @@ FONT_BOLD = r"C:\Windows\Fonts\malgunbd.ttf"
 VIDEO_EXT = {".mp4", ".mov", ".mkv", ".webm", ".avi"}
 
 # 레이아웃
-CARD = 720                 # 왼쪽 이미지 카드 한 변
-CARD_X, CARD_Y = 130, 150
+CARD_W, CARD_H = 720, 720  # 왼쪽 이미지 카드 (--card 로 변경. 16:9 소스면 800x450 권장)
+CARD_X = 130
 LYR_X = 980                # 가사 시작 x
 LYR_Y = 470                # 현재 줄의 y (여기를 중심으로 위아래 배치)
 LYR_STEP = 82              # 줄 간격
@@ -249,6 +249,9 @@ def main():
     ap.add_argument("--timed", default=None,
                     help="⭐ LRC/SRT 파일 — 있으면 --lyrics·--cues 불필요 (가장 정확)")
     ap.add_argument("--cues", default=None, help="섹션 타임코드 파일 (없으면 균등 분배)")
+    ap.add_argument("--card", default=f"{CARD_W}x{CARD_H}",
+                    help="왼쪽 카드 크기 WxH (기본 720x720). "
+                         "16:9 소스는 800x450 이 잘리는 데 없이 예쁘다")
     ap.add_argument("--title", default=None, help="제목 (생략 시 오디오 파일명)")
     ap.add_argument("--artist", default="", help="아티스트")
     ap.add_argument("--dump-cues", action="store_true",
@@ -272,6 +275,15 @@ def main():
 
     if not a.output:
         sys.exit("[에러] -o/--output 이 필요합니다.")
+
+    m = re.fullmatch(r"(\d+)\s*[xX*]\s*(\d+)", a.card.strip())
+    if not m:
+        sys.exit(f"[에러] --card 는 '800x450' 형식이어야 합니다: {a.card!r}")
+    cw, ch = int(m.group(1)), int(m.group(2))
+    if CARD_X + cw + 30 > LYR_X:
+        sys.exit(f"[에러] 카드 너비 {cw}px 가 가사 영역(x={LYR_X})을 침범합니다. "
+                 f"{LYR_X - CARD_X - 30}px 이하로 잡으세요.")
+    cy = max(0, (BAR_Y - 100 - ch) // 2)   # 하단 제목·진행바 위 영역에 수직 중앙 배치
 
     dur = audio_duration(a.audio)
     title = a.title or Path(a.audio).stem
@@ -327,9 +339,9 @@ def main():
         f"[b0]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},"
         f"boxblur=24:2,eq=brightness=-0.28:saturation=0.85[bg];"
         # 카드: 왼쪽 정사각 썸네일
-        f"[b1]scale={CARD}:{CARD}:force_original_aspect_ratio=increase,"
-        f"crop={CARD}:{CARD}[card];"
-        f"[bg][card]overlay={CARD_X}:{CARD_Y}[base];"
+        f"[b1]scale={cw}:{ch}:force_original_aspect_ratio=increase,"
+        f"crop={cw}:{ch}[card];"
+        f"[bg][card]overlay={CARD_X}:{cy}[base];"
         # 하단 제목 + 진행바 틀 + 시간
         f"[base]drawbox=x={BAR_X}:y={BAR_Y}:w={bw}:h={BAR_H}:color=white@0.18:t=fill,"
         f"drawtext=fontfile=_lv_bold.ttf:textfile=_lv_title.txt:"
