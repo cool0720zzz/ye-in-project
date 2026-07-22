@@ -80,6 +80,11 @@ LYR_STEP = 82              # 줄 간격
 # (앞뒤 오프셋, 글자크기, 불투명도) — 현재 줄(0)은 검은 박스로 강조,
 # 아래로 갈수록 흐려지며 사라진다
 SLOTS = [(-1, 42, 0.40), (0, 52, 1.00), (1, 44, 0.80), (2, 42, 0.60), (3, 40, 0.35)]
+# --glide 용. 위아래로 한 칸씩(-2, +4) 더 두어 **페이드 인/아웃 자리**를 만든다.
+# 이게 없으면 맨 위 줄이 사라질 때·맨 아래 줄이 나타날 때 툭 튄다.
+SLOT_STYLE = {-2: (42, 0.00), -1: (42, 0.40), 0: (52, 1.00),
+              1: (44, 0.80), 2: (42, 0.60), 3: (40, 0.35), 4: (40, 0.00)}
+GLIDE_T = 0.28             # 한 칸 미끄러지는 데 걸리는 시간(초)
 BAR_H = 6                  # 진행바 두께 (폭은 카드 폭에 맞춰 자동)
 WAVE_H = 64                # --wave 파형 높이
 FPS = 24
@@ -302,6 +307,9 @@ def main():
     ap.add_argument("--title", default=None, help="제목 (생략 시 오디오 파일명)")
     ap.add_argument("--artist", default="", help="아티스트 (기본: 표기 안 함)")
     ap.add_argument("--no-bar", action="store_true", help="진행바·시간 빼고 제목만")
+    ap.add_argument("--glide", action="store_true",
+                    help="⭐ 가사가 바뀔 때 자리를 툭 바꾸지 않고 미끄러지듯 넘어간다 "
+                         "(끝에서 살짝 넘쳤다 돌아오는 「꿀렁」 포함)")
     ap.add_argument("--wave", action="store_true",
                     help="⭐ 밋밋한 진행바 대신 곡 전체 파형. 재생된 만큼만 밝아진다 "
                          "(움직이지 않아 가사를 방해하지 않는다)")
@@ -384,23 +392,51 @@ def main():
                          encoding="utf-8")
     tmp.append(title_txt)
 
-    # ── 가사 drawtext: 현재 줄은 검은 박스로 강조, 아래로 갈수록 흐려짐
+    # ── 가사 drawtext
     draws = []
-    for i, (s, e, _) in enumerate(timeline):
-        for off, size, alpha in SLOTS:
-            j = i + off              # 이 슬롯에 그릴 가사 줄
-            if not 0 <= j < len(timeline):
-                continue
-            cur = off == 0
-            style = ("box=1:boxcolor=black@0.82:boxborderw=18" if cur
-                     else "shadowcolor=black@0.7:shadowx=2:shadowy=2")
-            draws.append(
-                f"drawtext=fontfile={F_BOLD if cur else F_REG}:"
-                f"textfile=_lv_{j:03d}.txt:"
-                f"x={lyr_x}:y={lyr_y + off * LYR_STEP}:"
-                f"fontsize={size}:fontcolor=white@{alpha}:{style}:"
-                f"enable='between(t,{s:.3f},{e:.3f})'"
-            )
+    if not a.glide:
+        # 기본: 자리도 밝기도 그 순간 툭 바뀐다. 현재 줄은 검은 박스로 강조
+        for i, (s, e, _) in enumerate(timeline):
+            for off, size, alpha in SLOTS:
+                j = i + off          # 이 슬롯에 그릴 가사 줄
+                if not 0 <= j < len(timeline):
+                    continue
+                cur = off == 0
+                style = ("box=1:boxcolor=black@0.82:boxborderw=18" if cur
+                         else "shadowcolor=black@0.7:shadowx=2:shadowy=2")
+                draws.append(
+                    f"drawtext=fontfile={F_BOLD if cur else F_REG}:"
+                    f"textfile=_lv_{j:03d}.txt:"
+                    f"x={lyr_x}:y={lyr_y + off * LYR_STEP}:"
+                    f"fontsize={size}:fontcolor=white@{alpha}:{style}:"
+                    f"enable='between(t,{s:.3f},{e:.3f})'"
+                )
+    else:
+        # 미끄러짐: 줄이 바뀌는 순간 **이전 칸 위치에서 출발해** 새 칸으로 흘러간다.
+        # y는 easeOutBack(끝에서 살짝 넘쳤다 돌아옴)으로 「꿀렁」을, alpha는
+        # 선형으로 밝기 전환을 담당한다. fontsize는 표현식을 못 받아 그 순간 바뀐다.
+        # ⚠️ 검은 박스는 쓰지 않는다 — boxcolor가 표현식을 못 받아 박스만 순간이동한다.
+        for i, (s, e, _) in enumerate(timeline):
+            for off in (-2, -1, 0, 1, 2, 3):
+                j = i + off
+                if not 0 <= j < len(timeline):
+                    continue
+                size, al = SLOT_STYLE[off]
+                _, pal = SLOT_STYLE[off + 1]        # 직전 칸의 밝기
+                if al == 0 and pal == 0:
+                    continue
+                p = f"min(1,max(0,(t-{s:.3f})/{GLIDE_T}))"
+                ease = f"(1+2.70158*pow({p}-1,3)+1.70158*pow({p}-1,2))"
+                draws.append(
+                    f"drawtext=fontfile={F_BOLD if off == 0 else F_REG}:"
+                    f"textfile=_lv_{j:03d}.txt:"
+                    f"x={lyr_x}:"
+                    f"y='{lyr_y}+{LYR_STEP}*(({off}+1)-{ease})':"
+                    f"fontsize={size}:fontcolor=white:"
+                    f"alpha='{pal:.2f}+{al - pal:.2f}*{p}':"
+                    f"shadowcolor=black@0.7:shadowx=2:shadowy=2:"
+                    f"enable='between(t,{s:.3f},{e:.3f})'"
+                )
 
     total_esc = mmss(dur).replace(":", r"\:")
     elapsed = r"%{eif\:floor(t/60)\:d}\:%{eif\:floor(mod(t\,60))\:d\:2}"
