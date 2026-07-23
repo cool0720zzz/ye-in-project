@@ -24,6 +24,12 @@ import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
+# Windows 콘솔(cp949)에서 —·★ 등 유니코드 print가 죽지 않게 stdout을 UTF-8로.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "gallery" / "manifest.json"
 KST = timezone(timedelta(hours=9))
