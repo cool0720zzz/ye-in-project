@@ -70,6 +70,8 @@ def main():
     ap.add_argument("--title", required=True)
     ap.add_argument("--verdict", default="", help="클로드 자동 판정 한 줄")
     ap.add_argument("--meta", default=None, help="표시용 경로 (기본: --file)")
+    ap.add_argument("--final", action="store_true",
+                    help="완성 결과물 — 뒤에 이어갈 게 없음. 폰에서 '이어가기' 대신 '완료' 버튼")
     a = ap.parse_args()
 
     src = Path(a.file)
@@ -90,7 +92,8 @@ def main():
     item = {
         "id": a.id, "type": a.type, "title": a.title,
         "created": datetime.now(KST).strftime("%Y-%m-%d %H:%M"),
-        "verdict": a.verdict, "meta": rel, "status": "new", "thumb": thumb,
+        "verdict": a.verdict, "meta": rel, "status": "new",
+        "final": bool(a.final), "thumb": thumb,
     }
     items = [it for it in data.get("items", []) if it.get("id") != a.id]
     items.insert(0, item)                     # 새 것이 위로
