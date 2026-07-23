@@ -1,5 +1,5 @@
 {
-  "submitted": "2026-07-23T13:17:20.284Z",
+  "submitted": "2026-07-23T16:54:18.144Z",
   "decisions": {
     "a02-workaholic-keyboard": {
       "choice": "continue",
@@ -14,6 +14,11 @@
       "choice": "rework",
       "ts": "2026-07-23T13:16:51.366Z",
       "notes": "인파속에서 벽 한쪽에 기대있는게 어떨까?"
+    },
+    "a05-sinho-redlight": {
+      "choice": "rework",
+      "ts": "2026-07-23T16:53:36.970Z",
+      "notes": "예인이 뭐 담배피우니? 그냥 도시 신호등에 사람들이 아웃포커싱 되고 예인이만 보이는 이미지로 가보는게 좋을듯\n"
     }
   }
 }
