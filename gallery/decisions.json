@@ -1,13 +1,13 @@
 {
-  "submitted": "2026-07-23T16:54:18.144Z",
+  "submitted": "2026-07-24T05:40:48.097Z",
   "decisions": {
     "a02-workaholic-keyboard": {
       "choice": "continue",
       "ts": "2026-07-23T11:09:59.064Z"
     },
     "a03-hoesik-table": {
-      "choice": "rework",
-      "ts": "2026-07-23T13:13:07.654Z",
+      "choice": "continue",
+      "ts": "2026-07-24T05:40:38.357Z",
       "notes": "고개 숙이고 있다가 그개 들고베시시 웃고 예인이 주변이 약간 흐리고 뱅글뱅글 도는 느낌 어떨까함."
     },
     "a04-beonhwaga-crowd": {
